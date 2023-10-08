@@ -62,70 +62,8 @@ class Window():
         self.window = Window()
         self.form = Form()
         self.form.setupUi(self.window)
-        self.cache = {"FOs": [], "regions": [], "cities": [], "universities": []}
         # window.show()
     
-    def filter_by_FO(self):
-        FO = self.form.comboBoxFO.currentText()
-        if not self.cache['FOs']:
-            FOs = get_data(db_name, query="SELECT DISTINCT region FROM VUZ")
-            self.cache['FOs'] = [FO[0] for FO in FOs]
-        if FO not in self.cache['FOs']:
-            return
-        self.FO = FO
-        regions = get_data(
-            db_name,
-            query=f"SELECT DISTINCT oblname FROM VUZ  WHERE region = '{FO}'")
-        self.cache['regions'] = [region[0] for region in regions]
-        self.form.comboBoxRegion.clear()
-        self.form.comboBoxRegion.addItems(self.cache['regions'])
-
-
-    def filter_by_region(self):
-        region = self.form.comboBoxRegion.currentText()
-        if region not in self.cache['regions']:
-            return
-        self.region = region
-        cities = get_data(
-            db_name, 
-            query=f"SELECT DISTINCT city FROM VUZ WHERE oblname = '{region}'")
-        self.cache['cities'] = [city[0] for city in cities]
-        self.form.comboBoxCity.clear()
-        self.form.comboBoxCity.addItems(self.cache['cities'])
-            
-
-
-    def filter_by_city(self):
-        city = self.form.comboBoxCity.currentText()
-        if city not in self.cache['cities']:
-            return
-        self.city = city
-        universities = get_data(
-            db_name, 
-            query=f"SELECT DISTINCT z2 FROM VUZ WHERE city = '{city}'")
-        self.cache['universities'] = [university[0] for university in universities]
-        self.form.comboBoxUniversity.clear()
-        self.form.comboBoxUniversity.addItems(self.cache['universities'])
-
-    def filter_by_university(self):
-        university = self.form.comboBoxUniversity.currentText()
-        if university not in self.cache['universities']:
-            return
-        self.university = university
-
-    def apply_filter(self, main_window):
-        def inner():
-            data = get_data(main_window.db_name, 
-                            query=f"""SELECT Tp_nir.* 
-                            FROM Tp_nir JOIN VUZ ON Tp_nir.codvuz = VUZ.codvuz
-                            WHERE region = '{self.FO}' 
-                            AND oblname = '{self.region}' 
-                            AND city = '{self.city}'
-                            AND Tp_nir.z2 = '{self.university}'""")
-            main_window.show_table('Tp_nir', 'Nir', 'Информация о НИР', config.TP_NIR_HEADERS,
-                                config.TP_NIR_COLUMN_WIDTH, data)
-        return inner
-
     def connect_db(self, db_name):
         db = QSqlDatabase.addDatabase('QSQLITE')
         db.setDatabaseName(db_name)
@@ -133,6 +71,107 @@ class Window():
             print('Не удалось подключиться к базе')
             return False
         return db
+
+
+class FilterWindow(Window):
+    def __init__(self, ui) -> None:
+        super().__init__(ui)
+        self.meta = {"FOs": [""], "regions": [""], "cities": [""], "universities": [""]}
+        self.query_template = """
+        SELECT DISTINCT {select_column} 
+        FROM Tp_nir JOIN VUZ ON Tp_nir.codvuz = VUZ.codvuz
+        WHERE {column} = "{value}" """
+
+        for data in get_data(db_name, query="SELECT DISTINCT region, oblname, city, z2 FROM VUZ"):
+            self.meta['FOs'].append(data[0])    
+            self.meta['regions'].append(data[1])    
+            self.meta['cities'].append(data[2])    
+            self.meta['universities'].append(data[3])    
+        
+        self.meta = {k: sorted(set(v)) for k, v in self.meta.items()}
+        self.form.comboBoxFOs.addItems(self.meta['FOs'])
+        self.form.comboBoxRegions.addItems(self.meta['regions'])
+        self.form.comboBoxCities.addItems(self.meta['cities'])
+        self.form.comboBoxUniversities.addItems(self.meta['universities'])
+    
+    def get_combobox_values(self, target_column):
+        query = []
+        for column, box_name in zip(["region", "oblname", "city", "VUZ.z2"],
+                                    ["FOs", "Regions", "Cities", "Universities"]):
+            if column == target_column:
+                break
+            value = getattr(self.form, f"comboBox{box_name}").currentText()
+            print(value)
+            if value:
+                query.append(self.query_template.format(column=column,
+                                                        value=value,
+                                                        select_column=target_column))
+        if query:
+            query = "\nINTERSECT\n".join(set(query))
+        else:
+            query = f"SELECT DISTINCT {target_column} FROM VUZ"
+        return sorted([element[0] for element in get_data(db_name, query=query)])
+        
+    
+    def FO_filter(self):
+        regions = self.get_combobox_values("oblname")
+        self.meta['regions'] = [""] + regions
+        self.form.comboBoxRegions.clear()
+        self.form.comboBoxRegions.addItems(self.meta['regions'])
+
+    def region_filter(self):
+        cities = self.get_combobox_values("city")
+        print(cities)
+        self.meta['cities'] = [""] + cities
+        self.form.comboBoxCities.clear()
+        self.form.comboBoxCities.addItems(self.meta['cities'])
+        # kregion = self.form.comboBoxRegions.currentText()
+        # if region not in self.meta['regions']:
+        #     return
+        # self.region = region
+        # cities = get_data(
+        #     db_name, 
+        #     query=f"SELECT DISTINCT city FROM VUZ WHERE oblname = '{region}'")
+        # self.meta['cities'] = [""] + [city[0] for city in cities]
+        # self.form.comboBoxCities.clear()
+        # self.form.comboBoxCities.addItems(self.meta['cities'])
+            
+    def city_filter(self):
+        universities = self.get_combobox_values("VUZ.z2")
+        self.meta['universities'] = [""] + universities
+        self.form.comboBoxUniversities.clear()
+        self.form.comboBoxUniversities.addItems(self.meta['universities'])
+        # city = self.form.comboBoxCities.currentText()
+        # if city not in self.meta['cities']:
+        #     return
+        # self.city = city
+        # universities = get_data(
+        #     db_name, 
+        #     query=f"SELECT DISTINCT z2 FROM VUZ WHERE city = '{city}'")
+        # self.meta['universities'] = [""] + [university[0] for university in universities]
+        # self.form.comboBoxUniversities.clear()
+        # self.form.comboBoxUniversities.addItems(self.meta['universities'])
+
+    @send_args_inside_func
+    def apply_filter(self, main_window):
+        query_template = """
+        SELECT Tp_nir.* 
+        FROM Tp_nir JOIN VUZ ON Tp_nir.codvuz = VUZ.codvuz
+        WHERE {column} = "{value}"
+        """
+        query = []
+        for column, box_name in zip(["region", "oblname", "city", "z2"],
+                                    ["FOs", "Regions", "Cities", "Universities"]):
+            value = getattr(self.form, f"comboBox{box_name}").currentText()
+            if value:
+                query.append(query_template.format(column=column, value=value))
+
+        if not query:
+            return
+        
+        data = get_data(main_window.db_name, query="\nINTERSECT\n".join(query))
+        main_window.show_table('Tp_nir', 'Nir', 'Информация о НИР', config.TP_NIR_HEADERS,
+                            config.TP_NIR_COLUMN_WIDTH, data)
 
 
 class MainWindow(Window):
@@ -208,9 +247,9 @@ def close_all():
 
 
 app = qtw.QApplication([])
-main_window = MainWindow('MainForm_layout.ui', db_name)
-filter_window = Window('filtr.ui')
 exit_window = Window('ex_aht.ui')
+main_window = MainWindow('MainForm_layout.ui', db_name)
+filter_window = FilterWindow('filtr.ui')
 # main_window.show_table('VUZ', 'Vuz')
 for values in zip(main_window.tables, config.widgetnames,
                     ['Информация о финансировании', 'Информация о ВУЗах',
@@ -221,14 +260,11 @@ for values in zip(main_window.tables, config.widgetnames,
                     config.GRNTI_COLUMN_WIDTH, config.TP_NIR_COLUMN_WIDTH], [None]*4):
     main_window.show_table(*values)
 
-for FO in get_data(db_name, query="SELECT DISTINCT region FROM VUZ"):
-    filter_window.cache['FOs'].append(FO[0])
 
-filter_window.form.comboBoxFO.addItems(filter_window.cache['FOs'])
-filter_window.form.comboBoxFO.currentTextChanged.connect(filter_window.filter_by_FO)
-filter_window.form.comboBoxRegion.currentTextChanged.connect(filter_window.filter_by_region)
-filter_window.form.comboBoxCity.currentTextChanged.connect(filter_window.filter_by_city)
-filter_window.form.comboBoxUniversity.currentTextChanged.connect(filter_window.filter_by_university)
+filter_window.form.comboBoxFOs.currentTextChanged.connect(filter_window.FO_filter)
+filter_window.form.comboBoxRegions.currentTextChanged.connect(filter_window.region_filter)
+filter_window.form.comboBoxCities.currentTextChanged.connect(filter_window.city_filter)
+# filter_window.form.comboBoxUniversities.currentTextChanged.connect()
 filter_window.form.filterButton.clicked.connect(filter_window.apply_filter(main_window))
 
 main_window.form.comboBoxSort.currentTextChanged.connect(sort_selected(main_window))
